@@ -80,8 +80,9 @@ int main(int argc, char *argv[])
         vector<decodedObject> decodedObjects;
         cap>>im;
         vector<Point> qrCodeCorners; //
-        polylines(im, qrCodeCorners, true, cv::Scalar(255, 0, 255 ), 2); //
+        QrCodeDetector.detectAndDecode(im, qrCodeCorners); //
         decode(im, decodedObjects);
+        if(decodedObjects.size()) polylines(im, qrCodeCorners, true, cv::Scalar(255, 0, 255 ), 2); //
         imshow("Results", im);
         waitKey(1);
         if(decodedObjects.size()) waitKey(0);
