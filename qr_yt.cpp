@@ -9,6 +9,10 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/objdetect.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 
 using namespace std;
 using namespace cv;
@@ -75,6 +79,8 @@ int main(int argc, char *argv[])
     while(1) {
         vector<decodedObject> decodedObjects;
         cap>>im;
+        vector<Point> qrCodeCorners; //
+        polylines(im, qrCodeCorners, true, cv::Scalar(255, 0, 255 ), 2); //
         decode(im, decodedObjects);
         imshow("Results", im);
         waitKey(1);
