@@ -11,8 +11,6 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/objdetect.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgproc.hpp>
 
 using namespace std;
 using namespace cv;
@@ -39,7 +37,7 @@ void decode(Mat &im, vector<decodedObject>&decodedObjects)
 
   // Convert image to grayscale
   Mat imGray;
-  cvtColor(im, imGray,CV_BGR2GRAY);
+  cvtColor(im, imGray,COLOR_BGR2GRAY);
 
   // Wrap image data in a zbar image
   Image image(im.cols, im.rows, "Y800", (uchar *)imGray.data, im.cols * im.rows);
