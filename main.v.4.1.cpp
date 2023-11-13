@@ -70,6 +70,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <ctype.h>
+#include <wiringpi.h>
 // #include <bcm2835.h>
 
 using namespace cv;
@@ -97,6 +98,18 @@ using namespace zbar;
 #define SCALE_OPF 0.1
 #define SCALE_OBS 0.2
 #define SCALE_line_land_qr 0.3 //HERE
+
+//USLEEP : micro second
+#define USLEEP_arm 5000000
+#define USLEEP_takeoff 5000000
+#define USLEEP_servo 100000
+
+//SERVO
+#define SERVO_frequency 50
+#define SERVO_pin 18
+#define SERVO_rotationRate 10
+#define SERVO_PWM_clock_divisor 192
+#define SERVO_PWM_range 2000 //NOTE for SERVO_frequency 50?
 
 //MAVLINK
 
@@ -222,9 +235,6 @@ using namespace zbar;
 #define THRESH_QR_timer_getOutOfBox 2000
 #define THRESH_QR_dx 50
 #define THRESH_QR_dy 50
-//usleep : micro second
-#define THRESH_USLEEP_arm 5000000
-#define THRESH_USLEEP_takeoff 5000000
 
 //DEBUG FLAGS
 
@@ -362,35 +372,41 @@ void display(Mat &im, vector<decodedObject>&decodedObjects);
 
 int main() {
 
+    serialPort = open("/dev/ttyACM0", O_RDWR);//"\\\\.\\COM11",   O_RDWR); //flag
+    if(serialPort == -1)  {
+        cerr << "serialPort_init: Unable to open port" << endl;
+        return 0;
+    } else if(DEBUG_TXT) cout << "serialPort is open" << endl;
+
     if(DEBUG_TXT && !(DEBUG_txt_opf || DEBUG_txt_line || DEBUG_txt_qr || DEBUG_txt_obs || DEBUG_txt_land || DEBUG_txt_mission)) {
         cerr << "activating AT LEAST ONE text debugger is necessary when DEBUG_TXT is 1 (Ln 32)" << endl;
         return -1;
     }
     if(DEBUG_CAM && !(DEBUG_cam_opf ^ DEBUG_cam_line ^ DEBUG_cam_qr ^ DEBUG_cam_obs ^ DEBUG_cam_land ^ DEBUG_cam_mission)) {
         cerr << "activating ONLY ONE camera debugger is necessary when DEBUG_CAM is 1 (Ln 38)" << endl;
-        return 0;
+        return -2;
     }
     while(toTheMission > 4 || toTheMission < 0) {
         cout << "input toTheMission : ";
         cin >> toTheMission;
         if(toTheMission == 4) isLandingState = true;
     }
-    
-    serialPort = open("\\\\.\\COM11",   O_RDWR); //flag
-    if(serialPort == -1)  {
-        cerr << "serialPort_init: Unable to open port" << endl;
-        return -1;
-    } else if(DEBUG_TXT) cout << "serialPort is open" << endl;
-    
+        
+    if(MISSION_DO_3){
+        if(wiringPiSetupGpio() == -1){
+            cerr << "Failed to initialize WiringPi" << endl;
+            return -3;
+        }
+    }
     //creat threads
     thread FollowLine(lineXqrXland);
     thread OpticalFlow(opticalFlow);
-    thread AvoidObstacle(obstacle);
+    // thread AvoidObstacle(obstacle); //PLAYGROUND
 
     //joint threads
     if(OpticalFlow.joinable()) OpticalFlow.join();
     if(FollowLine.joinable()) FollowLine.join();
-    if(AvoidObstacle.joinable()) AvoidObstacle.join();
+    // if(AvoidObstacle.joinable()) AvoidObstacle.join(); //PLAYGROUND
 
     return 1; 
 }
@@ -401,6 +417,11 @@ int main() {
     // ##                      ##
     // ##########################
 
+//SERVO
+void setServoPosition(int pin, int position){
+    int dutyCycle = (position*200/180)+SERVO_frequency; //+50
+    pwmWrite(pin, dutyCycle);
+}
 //MAVLINK
 void MAVLINK_decode() {
     uint8_t bufRead;
@@ -924,8 +945,8 @@ void opticalFlow() {
         //mavlink massage
         if(DEBUG_TXT && DEBUG_txt_opf) cout << debugID <<"horizontal(dx)= "<<totalMovementx<<"   forward(dy)="<<totalMovementy <<"     flow quality = "<<flow_quality<<"     fps = "<<fpslive<<endl; //<<endl;
         optical_flow.time_usec = 0;
-        optical_flow.flow_x = totalMovementx;
-        optical_flow.flow_y = totalMovementy; 
+        optical_flow.flow_x = totalMovementx; // ????
+        optical_flow.flow_y = totalMovementy; // ????
         optical_flow.quality = flow_quality; 
         optical_flow.sensor_id = 100;
         optical_flow.ground_distance = -1;
@@ -1005,7 +1026,8 @@ void lineXqrXland() {
     mavlink_msg_command_long_pack(MAVLINK_MSG_systemID, MAVLINK_MSG_componentID, &msgArm, 1, 1, MAVLINK_MSG_arm_typeMASK, 1, 1, 0, 0, 0, 0, 0, 0);
     mavlink_msg_to_send_buffer(bufArm, &msgArm);
     write(serialPort, &bufArm, MAVLINK_MAX_PACKET_LEN);
-    usleep(THRESH_USLEEP_arm);
+    cout << "armed" << endl;
+    usleep(USLEEP_arm);
 
     //takeoff
     uint8_t bufTakeoff[MAVLINK_MAX_PACKET_LEN];
@@ -1015,9 +1037,10 @@ void lineXqrXland() {
         mavlink_msg_command_long_pack(MAVLINK_MSG_systemID, MAVLINK_MSG_componentID, &msgTakeoff, 1, 0, MAVLINK_MSG_takeoff_typeMASK, 0, 0, 0, 0, 0, 0, 0, 0.5);
         mavlink_msg_to_send_buffer(bufTakeoff, &msgTakeoff);
         write(serialPort, &bufTakeoff, MAVLINK_MAX_PACKET_LEN);
-        usleep(THRESH_USLEEP_takeoff);
+        //usleep(USLEEP_takeoff);
     } while(!altInRange());
-
+    cout << "took off" << endl; //PLAYGROUND
+    return; //PLAYGROUND
     //go to rout
     for(int i = 0; i < THRESH_BESMELLAH; i++) MAVLINK_moveForward(MAVLINK_VELOCITY_SLOW);
 
@@ -1126,7 +1149,15 @@ void lineXqrXland() {
                     }
                 } else if(subStateMachine == 2) {
                     //drop
-                    //confirm
+                    pinMode(SERVO_pin, PWM_OUTPUT);
+                    pwmSetMode(PWM_MODE_MS);
+                    pwmSetClock(SERVO_PWM_clock_divisor);
+                    pwmSetRange(SERVO_PWM_range);
+                    for(int position = 0; position <= 180; position += SERVO_rotationRate){
+                        setServoPosition(SERVO_pin, position);
+                        usleep(USLEEP_servo);
+                    }
+                    //HERE confirm
                     subStateMachine++; 
                 } else if(subStateMachine == 3) {
                     MAVLINK_turnTo(lastYaw-MAVLINK_YAW_180);
@@ -1433,6 +1464,7 @@ void lineXqrXland() {
             //flag
         }
 
+    /*
         // if(!(get_stateMachine() == STATE_LINE_getBackInto_rout || get_stateMachine() == STATE_OBS_decrease_alt || get_stateMachine() == STATE_OBS_increase_alt) && (d[CROP_mid][BLACK] || (d[CROP_mid][BLACK] && d[CROP_mid][BLACK]))) {
         //     if(DEBUG_TXT && DEBUG_txt_line) cout << debugID << "pitch 15 degree to " << debugForward << endl;
         // } else {
@@ -1441,7 +1473,7 @@ void lineXqrXland() {
         //     Canny(mask_black, canny, 50, 200, 3);
         //     // runs the actual detection
         //     HoughLinesP(canny, linesP, 1, CV_PI/180, 50, 200, 200 ); 
-
+        //
         //     if(!linesP.empty()){    
         //         // Draw the lines
         //         for( size_t i = 0; i < linesP.size(); i++ ) {
@@ -1562,7 +1594,7 @@ void lineXqrXland() {
         //         if(DEBUG_TXT && DEBUG_txt_line) cout << debugID << "previousDirection is was_going_right ===> roll & pitch 15 degree to the " << debugLeft << endl;
         //     }
         // }
-
+    */
         
         //send mavlink msgWrite
 
