@@ -1,0 +1,135 @@
+#include <opencv2/opencv.hpp>
+#include <vector>
+
+#define CONST_1 0.01
+
+using namespace cv;
+using namespace std;
+typedef enum {
+    STATE_ACT_changeYaw,
+    STATE_ACT_followRope,
+    STATE_CALC_ChangeYaw,
+} state_machine;
+class StateMachine {
+    protected:
+        int timer;
+        state_machine currentState;
+        state_machine previousState;
+};
+
+// Function to preprocess the image and isolate the rope
+Mat preprocessImage(const Mat& src, int case, float scale) {
+    Mat processed;
+    resize(src, processed, Size(), scale, scale);
+    switch(mode){
+        case 0:
+            // Convert to grayscale
+            cvtColor(processed, processed, COLOR_BGR2RGB);
+            cvtColor(processed, processed, COLOR_BGR2HSV);
+            // Apply threshold or other preprocessing to isolate the rope
+    }
+    // For example, threshold(processed, processed, 128, 255, THRESH_BINARY);
+    return processed;
+}
+
+// Function to detect the rope and perform linear regression
+Vec4f detectRopeAndFitLine(const Mat& src) {
+    vector<Point> points;
+
+    // Extract points from the preprocessed image
+    for (int y = 0; y < src.rows; y++) {
+        for (int x = 0; x < src.cols; x++) {
+            if (src.at<uchar>(y, x) > 0) {
+                points.push_back(Point(x, y));
+            }
+        }
+    }
+
+    Vec4f line;
+    if (!points.empty()) {
+        // Fit line to points using linear regression
+        fitLine(points, line, DIST_L2, 0, CONST_1, CONST_1);
+        // Calculate two points to draw the line
+        Point point1, point2;
+        point1.x = line[2] - 100 * line[0];
+        point1.y = line[3] - 100 * line[1];
+        point2.x = line[2] + 100 * line[0];
+        point2.y = line[3] + 100 * line[1];
+        line(src, point1, point2, Scalar(0, 255, 0), 3);
+    }
+    imshow("Rope Tracking", src);
+
+    return line;
+}
+float calcAtt(Vec4f line, float *yaw, float *dis){
+    Point point1, point2;
+    point1.x = line[2] - 100 * line[0];
+    point1.y = line[3] - 100 * line[1];
+    point2.x = line[2] + 100 * line[0];
+    point2.y = line[3] + 100 * line[1];
+    *yaw = atan((point2.y-point1.y)/(point2.x-point1.x)); //NOTE: -?
+    *dis = sqrt((point2.y-point1.y)*(point2.y-point1.y)+(point2.x-point1.x)*(point2.x-point1.x))
+}
+
+float arr_yaw[crop_c_len];
+float arr_dis[crop_c_len];
+#define SERIAL_CLOCK_RESET_YAW 5
+int main() {
+    // Open the default camera
+    VideoCapture cap(0);
+    if (!cap.isOpened()) {
+        return -1;
+    }
+
+    namedWindow("Rope Tracking", 1);
+    Mat frame;
+    if(!(crop_c_len%2)) crop_c_len++;
+    while (true) {
+        cap >> frame; // Get a new frame from the camera
+        if (frame.empty()) {
+            continue;
+        }
+        
+        if(get_stateMachine() == STATE_CALC_ChangeYaw) {
+            // Detect the rope and fit a line
+            Vec4f line = detectRopeAndFitLine(imgTo);
+            //PROGRAMMER
+            calcAtt(line, *ROBOT_set_yaw, *dis);
+            set_stateMachine(STATE_ACT_changeYaw);
+        }
+        if(get_stateMachine() == STATE_ACT_ChangeYaw) {
+            MAVLINK_setYaw(ROBOT_set_yaw);
+            // if(MAVLINK_isYawInRange()) set_stateMachine(STATE_ACT_followRope);
+        }
+        if(get_stateMachine() == STATE_ACT_followRope) {
+            // Preprocess the frame
+            Mat processed = preprocessImage(frame, case_, scale_);
+            inRange(processed, COLOR_lower_rope, COLOR_upper_rope, mask_rope);
+            timer++;
+            IMG_crop_rope_left = mask_rope(Rect(int((width/crop_c_len)*((int)(crop_c_len/2))*SCALE_line_land_qr), 0, int((width/crop_c_len)*SCALE_line_land_qr), int(height*SCALE_line_land_qr)));
+            IMG_crop_rope_center = mask_rope(Rect(int((width/crop_c_len)*((int)(crop_c_len/2)+1)*SCALE_line_land_qr), 0, int((width/crop_c_len)*SCALE_line_land_qr), int(height*SCALE_line_land_qr)));
+            IMG_crop_rope_right = mask_rope(Rect(int((width/crop_c_len)*((int)(crop_c_len/2)+2)*SCALE_line_land_qr), 0, int((width/crop_c_len)*SCALE_line_land_qr), int(height*SCALE_line_land_qr)));
+            int leftPixels = countNonZero(IMG_crop_rope_left);
+            int centerPixels = countNonZero(IMG_crop_rope_center);
+            int rightPixels = countNonZero(IMG_crop_rope_right);
+            if(leftPixels > rightPixels + STH && rightPixels < STH2) {
+                imgTo = IMG_crop_rope_left;
+                setStateMachine(STATE_CALC_ChangeYaw);
+            } else if(leftPixels + STH < rightPixels && leftPixels < STH2) {
+                imgTo = IMG_crop_rope_right;
+                setStateMachine(STATE_CALC_ChangeYaw);
+            } else if(!(timer%SERIAL_CLOCK_RESET_YAW)) {
+                imgTo = IMG_crop_rope_center;
+                set_stateMachine(STATE_CALC_ChangeYaw);
+            } else continue;//moveTimer(sth, sth, sth);
+        }
+    }
+
+    if (waitKey(30) >= 0) {
+        break;
+    }
+    // Release the camera or video capture
+    cap.release();
+
+    return 0;
+}
