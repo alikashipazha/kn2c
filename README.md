@@ -1,5 +1,4 @@
 # kn2c
-# drone_imgproc
 Main3.0 code runs all the prosses in parallel <br />
 In main4.0 the different state of quad missions have been added.<br />
 states: <br />
